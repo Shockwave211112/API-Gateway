@@ -12,38 +12,30 @@ type Response struct {
 	Message string `json:"message"`
 }
 
-type infoHandler struct {
-	response string
-}
-
-func (ih *infoHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("Request Accepted")
-
-	data := Response{
-		Status:  "success",
-		Message: ih.response,
-	}
-
-	jsonBytes, err := json.Marshal(data)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, err = w.Write(jsonBytes)
-	if err != nil {
-		return
-	}
-}
-
 func main() {
 	mux := http.NewServeMux()
 
-	mainHandler := &infoHandler{response: "OK"}
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Println("Request Accepted")
 
-	mux.Handle("GET /health", mainHandler)
+		data := Response{
+			Status:  "success",
+			Message: "OK",
+		}
+
+		jsonBytes, err := json.Marshal(data)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, err = w.Write(jsonBytes)
+		if err != nil {
+			return
+		}
+	})
 
 	server := &http.Server{
 		Addr:         ":8080",
