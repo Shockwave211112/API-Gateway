@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"gateway/internal/config"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 )
 
 type Response struct {
@@ -18,6 +18,12 @@ type Response struct {
 }
 
 func main() {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
@@ -47,11 +53,11 @@ func main() {
 	defer stop()
 
 	server := &http.Server{
-		Addr:         ":8080",
+		Addr:         cfg.Server.Addr(),
 		Handler:      mux,
-		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  120 * time.Second,
+		ReadTimeout:  cfg.Server.ReadTimeout,
+		WriteTimeout: cfg.Server.WriteTimeout,
+		IdleTimeout:  cfg.Server.IdleTimeout,
 	}
 
 	go func() {
@@ -66,7 +72,7 @@ func main() {
 	case <-ctx.Done():
 		fmt.Println("Stop via commandline")
 
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeout)
 		defer cancel()
 
 		if err := server.Shutdown(shutdownCtx); err != nil {
