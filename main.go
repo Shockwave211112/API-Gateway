@@ -2,20 +2,16 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"gateway/internal/config"
+	"gateway/internal/jsonresponse"
+	"gateway/internal/proxy"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 )
-
-type Response struct {
-	Status  string `json:"status"`
-	Message string `json:"message"`
-}
 
 func main() {
 	cfg, err := config.Load()
@@ -24,29 +20,25 @@ func main() {
 		os.Exit(1)
 	}
 
-	mux := http.NewServeMux()
+	backendURL, err := cfg.App.Url()
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
 
+	proxyHandler := proxy.NewProxy(backendURL, cfg.App)
+
+	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("Request Accepted")
 
-		data := Response{
+		jsonresponse.WriteJSON(w, http.StatusBadGateway, jsonresponse.Body{
 			Status:  "success",
-			Message: "OK",
-		}
-
-		jsonBytes, err := json.Marshal(data)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, err = w.Write(jsonBytes)
-		if err != nil {
-			return
-		}
+			Message: "Alive",
+		})
 	})
+
+	mux.Handle("GET /l/{code}", proxyHandler)
 
 	errChan := make(chan error, 1)
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -66,7 +58,7 @@ func main() {
 		}
 	}()
 
-	fmt.Println("Server is running on http://localhost:8080")
+	fmt.Println("Server is running on http://" + cfg.Server.Addr())
 
 	select {
 	case <-ctx.Done():

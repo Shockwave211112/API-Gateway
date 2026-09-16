@@ -43,13 +43,16 @@ func (hp HostWithPort) Addr() string {
 }
 
 type Backend struct {
-	Host        string
-	Port        int
-	DialTimeout time.Duration
+	Host            string
+	Port            int
+	DialTimeout     time.Duration
+	ResponseTimeout time.Duration
+	IdleTimeout     time.Duration
+	MaxIdleConns    int
 }
 
 func (b Backend) Url() (*url.URL, error) {
-	return url.Parse("http//" + net.JoinHostPort(b.Host, strconv.Itoa(b.Port)))
+	return url.Parse("http://" + net.JoinHostPort(b.Host, strconv.Itoa(b.Port)))
 }
 
 type RateLimit struct {
@@ -206,15 +209,33 @@ func loadApp() (Backend, error) {
 		errs = append(errs, fmt.Errorf("invalid APP_PORT: %w", err))
 	}
 
-	timeout, err := time.ParseDuration(getEnv("APP_TIMEOUT", "120s"))
+	connectTimeout, err := time.ParseDuration(getEnv("APP_CONNECT_TIMEOUT", "10s"))
 	if err != nil {
-		errs = append(errs, fmt.Errorf("invalid APP_TIMEOUT: %w", err))
+		errs = append(errs, fmt.Errorf("invalid APP_CONNECT_TIMEOUT: %w", err))
+	}
+
+	responseTimeout, err := time.ParseDuration(getEnv("APP_RESPONSE_TIMEOUT", "120s"))
+	if err != nil {
+		errs = append(errs, fmt.Errorf("invalid APP_RESPONSE_TIMEOUT: %w", err))
+	}
+
+	idleTimeout, err := time.ParseDuration(getEnv("APP_IDLE_TIMEOUT", "120s"))
+	if err != nil {
+		errs = append(errs, fmt.Errorf("invalid APP_IDLE_TIMEOUT: %w", err))
+	}
+
+	maxIdleConns, err := strconv.Atoi(getEnv("APP_MAX_IDLE_CONNS", "10"))
+	if err != nil {
+		errs = append(errs, fmt.Errorf("invalid APP_MAX_IDLE_CONNS: %w", err))
 	}
 
 	app := Backend{
-		Host:        host,
-		Port:        port,
-		DialTimeout: timeout,
+		Host:            host,
+		Port:            port,
+		DialTimeout:     connectTimeout,
+		ResponseTimeout: responseTimeout,
+		IdleTimeout:     idleTimeout,
+		MaxIdleConns:    maxIdleConns,
 	}
 
 	if len(errs) > 0 {
