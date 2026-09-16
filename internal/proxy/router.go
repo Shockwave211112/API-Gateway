@@ -1,14 +1,14 @@
 package proxy
 
 import (
-	"fmt"
 	"gateway/internal/config"
 	"gateway/internal/jsonresponse"
+	"gateway/internal/middleware"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"uuid"
 )
 
 func NewProxy(backendUrl *url.URL, app config.Backend) http.Handler {
@@ -20,7 +20,9 @@ func NewProxy(backendUrl *url.URL, app config.Backend) http.Handler {
 			pr.Out.Header.Del("X-Forwarded-For")
 			pr.SetXForwarded()
 
-			pr.Out.Header.Set("X-Request-ID", uuid.New().String())
+			if reqId, ok := middleware.RequestIDFromContext(pr.In.Context()); ok {
+				pr.Out.Header.Set("X-Request-ID", reqId)
+			}
 		},
 
 		Transport: &http.Transport{
@@ -32,7 +34,11 @@ func NewProxy(backendUrl *url.URL, app config.Backend) http.Handler {
 		},
 
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, proxyErr error) {
-			fmt.Println(proxyErr.Error())
+			slog.Error(
+				"proxy error",
+				"error", proxyErr.Error(),
+				"path", r.URL.Path,
+			)
 			jsonresponse.WriteJSON(w, http.StatusBadGateway, jsonresponse.Body{
 				Status:  "error",
 				Message: "Internal Server Error",

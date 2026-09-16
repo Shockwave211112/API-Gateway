@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"gateway/internal/config"
 	"gateway/internal/jsonresponse"
+	"gateway/internal/middleware"
 	"gateway/internal/proxy"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -27,18 +29,24 @@ func main() {
 	}
 
 	proxyHandler := proxy.NewProxy(backendURL, cfg.App)
+	publicHandler := middleware.LoggerMiddleware(proxyHandler)
+	protectedHandler := middleware.LoggerMiddleware(proxyHandler)
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	slog.SetDefault(logger)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Println("Request Accepted")
-
 		jsonresponse.WriteJSON(w, http.StatusBadGateway, jsonresponse.Body{
 			Status:  "success",
 			Message: "Alive",
 		})
 	})
 
-	mux.Handle("GET /l/{code}", proxyHandler)
+	mux.Handle("GET /l/{code}", publicHandler)
+	mux.Handle("GET /api/", protectedHandler)
+	mux.Handle("POST /api/", protectedHandler)
+	mux.Handle("PUT /api/", protectedHandler)
+	mux.Handle("DELETE /api/", protectedHandler)
 
 	errChan := make(chan error, 1)
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
