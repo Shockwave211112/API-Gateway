@@ -28,11 +28,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	proxyHandler := proxy.NewProxy(backendURL, cfg.App)
-	publicHandler := middleware.LoggerMiddleware(proxyHandler)
-	protectedHandler := middleware.LoggerMiddleware(proxyHandler)
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	slog.SetDefault(logger)
+
+	httpClient := &http.Client{}
+	tokenCache := middleware.NewTokenCache()
+	authService := middleware.NewAuth(tokenCache, backendURL, httpClient)
+
+	proxyHandler := proxy.NewProxy(backendURL, cfg.App)
+	publicHandler := middleware.LoggerMiddleware(proxyHandler)
+	protectedHandler := middleware.LoggerMiddleware(authService.Middleware(proxyHandler))
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
@@ -43,10 +48,10 @@ func main() {
 	})
 
 	mux.Handle("GET /l/{code}", publicHandler)
-	mux.Handle("GET /api/", protectedHandler)
-	mux.Handle("POST /api/", protectedHandler)
-	mux.Handle("PUT /api/", protectedHandler)
-	mux.Handle("DELETE /api/", protectedHandler)
+	mux.Handle("GET /user", protectedHandler)
+	mux.Handle("POST /user", protectedHandler)
+	mux.Handle("PUT /user", protectedHandler)
+	mux.Handle("DELETE /user", protectedHandler)
 
 	errChan := make(chan error, 1)
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
