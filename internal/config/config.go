@@ -61,7 +61,7 @@ func (b Backend) Url() (*url.URL, error) {
 
 type RateLimit struct {
 	RatePerWindow int
-	WindowSecond  int
+	WindowSize    time.Duration
 }
 
 func Load() (Config, error) {
@@ -173,10 +173,7 @@ func loadRedis() (Redis, error) {
 		errs = append(errs, fmt.Errorf("invalid REDIS_PORT: %w", err))
 	}
 
-	password, err := mustGetEnv("REDIS_PWD")
-	if err != nil {
-		errs = append(errs, errors.New("REDIS_PWD must be init"))
-	}
+	password := getEnv("SERVER_HOST", "")
 
 	timeout, err := time.ParseDuration(getEnv("REDIS_TIMEOUT", "30s"))
 	if err != nil {
@@ -269,19 +266,19 @@ func loadApp() (Backend, error) {
 func loadRL() (RateLimit, error) {
 	var errs []error
 
-	rpw, err := strconv.Atoi(getEnv("RATE_LIMIT_RPW", "8080"))
+	rpw, err := strconv.Atoi(getEnv("RATE_LIMIT_RPW", "10"))
 	if err != nil {
 		errs = append(errs, fmt.Errorf("invalid RATE_LIMIT_RPW: %w", err))
 	}
 
-	windowSize, err := strconv.Atoi(getEnv("RATE_LIMIT_WINDOW_SECONDS", "8080"))
+	windowSize, err := time.ParseDuration(getEnv("RATE_LIMIT_WINDOW", "1s"))
 	if err != nil {
-		errs = append(errs, fmt.Errorf("invalid RATE_LIMIT_WINDOW_SECONDS: %w", err))
+		errs = append(errs, fmt.Errorf("invalid RATE_LIMIT_WINDOW: %w", err))
 	}
 
 	rl := RateLimit{
 		RatePerWindow: rpw,
-		WindowSecond:  windowSize,
+		WindowSize:    windowSize,
 	}
 
 	if len(errs) > 0 {

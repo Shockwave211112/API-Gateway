@@ -13,6 +13,8 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/redis/go-redis/v9"
 )
 
 func main() {
@@ -42,9 +44,20 @@ func main() {
 		httpClient,
 	)
 
+	redisClient := redis.NewClient(&redis.Options{
+		Addr:        cfg.Redis.Addr(),
+		Password:    cfg.Redis.Password,
+		DialTimeout: cfg.Redis.DialTimeout,
+	})
+	rateLimitService := middleware.NewRateLimiter(
+		redisClient,
+		cfg.RateLimit.RatePerWindow,
+		cfg.RateLimit.WindowSize,
+	)
+
 	proxyHandler := proxy.NewProxy(backendURL, cfg.App)
-	publicHandler := middleware.LoggerMiddleware(proxyHandler)
-	protectedHandler := middleware.LoggerMiddleware(authService.Middleware(proxyHandler))
+	publicHandler := middleware.LoggerMiddleware(rateLimitService.Middleware(proxyHandler))
+	protectedHandler := middleware.LoggerMiddleware(rateLimitService.Middleware(authService.Middleware(proxyHandler)))
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
