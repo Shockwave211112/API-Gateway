@@ -35,7 +35,12 @@ func main() {
 		Timeout: cfg.App.DialTimeout,
 	}
 	tokenCache := middleware.NewTokenCache()
-	authService := middleware.NewAuth(tokenCache, backendURL, httpClient)
+	authService := middleware.NewAuth(
+		tokenCache,
+		backendURL,
+		cfg.App.CheckRoute,
+		httpClient,
+	)
 
 	proxyHandler := proxy.NewProxy(backendURL, cfg.App)
 	publicHandler := middleware.LoggerMiddleware(proxyHandler)
@@ -49,11 +54,13 @@ func main() {
 		})
 	})
 
-	mux.Handle("GET /l/{code}", publicHandler)
-	mux.Handle("GET /user", protectedHandler)
-	mux.Handle("POST /user", protectedHandler)
-	mux.Handle("PUT /user", protectedHandler)
-	mux.Handle("DELETE /user", protectedHandler)
+	for _, v := range cfg.App.LoggedRoutes {
+		mux.Handle(v, publicHandler)
+	}
+
+	for _, v := range cfg.App.ProtectedRoutes {
+		mux.Handle(v, protectedHandler)
+	}
 
 	errChan := make(chan error, 1)
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

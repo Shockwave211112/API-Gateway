@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -49,6 +50,9 @@ type Backend struct {
 	ResponseTimeout time.Duration
 	IdleTimeout     time.Duration
 	MaxIdleConns    int
+	CheckRoute      string
+	LoggedRoutes    []string
+	ProtectedRoutes []string
 }
 
 func (b Backend) Url() (*url.URL, error) {
@@ -229,6 +233,21 @@ func loadApp() (Backend, error) {
 		errs = append(errs, fmt.Errorf("invalid APP_MAX_IDLE_CONNS: %w", err))
 	}
 
+	loggedRoutes := strings.Split(getEnv("APP_LOGGED_ROUTES", ""), ",")
+	for i := range loggedRoutes {
+		loggedRoutes[i] = strings.TrimSpace(loggedRoutes[i])
+	}
+
+	protectedRoutes := strings.Split(getEnv("APP_PROTECTED_ROUTES", ""), ",")
+	for i := range loggedRoutes {
+		protectedRoutes[i] = strings.TrimSpace(protectedRoutes[i])
+	}
+
+	checkRoute, err := mustGetEnv("APP_CHECK_ROUTE")
+	if err != nil {
+		errs = append(errs, errors.New("APP_CHECK_ROUTE must be init"))
+	}
+
 	app := Backend{
 		Host:            host,
 		Port:            port,
@@ -236,6 +255,9 @@ func loadApp() (Backend, error) {
 		ResponseTimeout: responseTimeout,
 		IdleTimeout:     idleTimeout,
 		MaxIdleConns:    maxIdleConns,
+		LoggedRoutes:    loggedRoutes,
+		ProtectedRoutes: protectedRoutes,
+		CheckRoute:      checkRoute,
 	}
 
 	if len(errs) > 0 {

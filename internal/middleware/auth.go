@@ -15,13 +15,15 @@ import (
 type Auth struct {
 	cache      *TokenCache
 	backendURL *url.URL
+	checkRoute string
 	client     *http.Client
 }
 
-func NewAuth(cache *TokenCache, backendURL *url.URL, client *http.Client) *Auth {
+func NewAuth(cache *TokenCache, backendURL *url.URL, checkRoute string, client *http.Client) *Auth {
 	return &Auth{
 		cache:      cache,
 		backendURL: backendURL,
+		checkRoute: checkRoute,
 		client:     client,
 	}
 }
