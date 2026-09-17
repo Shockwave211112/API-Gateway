@@ -55,7 +55,7 @@ func main() {
 		cfg.RateLimit.WindowSize,
 	)
 
-	proxyHandler := proxy.NewProxy(backendURL, cfg.App)
+	proxyHandler := proxy.NewProxy(backendURL, cfg.App, cfg.Server.BehindProxy)
 	publicHandler := middleware.LoggerMiddleware(rateLimitService.Middleware(proxyHandler))
 	protectedHandler := middleware.LoggerMiddleware(rateLimitService.Middleware(authService.Middleware(proxyHandler)))
 

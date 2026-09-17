@@ -1,6 +1,8 @@
 package proxy
 
 import (
+	"context"
+	"errors"
 	"gateway/internal/config"
 	"gateway/internal/jsonresponse"
 	"gateway/internal/middleware"
@@ -11,9 +13,28 @@ import (
 	"net/url"
 )
 
-func NewProxy(backendUrl *url.URL, app config.Backend) http.Handler {
+type contextKey string
+
+const proxyErrorKey contextKey = "proxy_error"
+
+func NewProxy(backendUrl *url.URL, app config.Backend, behindProxy bool) http.Handler {
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
+			if behindProxy {
+				realIp := pr.In.Header.Get("X-Real-IP")
+				if realIp != "" {
+					pr.In.RemoteAddr = realIp + ":0"
+				} else {
+					err := errors.New("BEHIND_PROXY set TRUE, but X-Real-IP is empty")
+					ctx := context.WithValue(pr.In.Context(), proxyErrorKey, err)
+					cancelCtx, cancel := context.WithCancel(ctx)
+					cancel()
+
+					pr.Out = pr.Out.WithContext(cancelCtx)
+					return
+				}
+			}
+
 			pr.Out.URL.Scheme = backendUrl.Scheme
 			pr.Out.URL.Host = backendUrl.Host
 
@@ -34,11 +55,19 @@ func NewProxy(backendUrl *url.URL, app config.Backend) http.Handler {
 		},
 
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, proxyErr error) {
-			slog.Error(
-				"proxy error",
-				"error", proxyErr.Error(),
-				"path", r.URL.Path,
-			)
+			if ctxErr, ok := r.Context().Value(proxyErrorKey).(error); ok {
+				slog.Error(
+					"request blocked by gateway",
+					"reason", ctxErr,
+				)
+			} else {
+				slog.Error(
+					"proxy error",
+					"error", proxyErr.Error(),
+					"path", r.URL.Path,
+				)
+			}
+
 			jsonresponse.WriteJSON(w, http.StatusBadGateway, jsonresponse.Body{
 				Status:  "error",
 				Message: "Internal Server Error",

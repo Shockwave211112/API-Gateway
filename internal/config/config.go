@@ -31,6 +31,7 @@ type Server struct {
 	WriteTimeout    time.Duration
 	IdleTimeout     time.Duration
 	ShutdownTimeout time.Duration
+	BehindProxy     bool
 }
 
 type Redis struct {
@@ -149,12 +150,15 @@ func loadServer() (Server, error) {
 		errs = append(errs, fmt.Errorf("invalid SHUTDOWN_TIMEOUT: %w", err))
 	}
 
+	behindProxy := getEnv("BEHIND_REVERSE_PROXY", "false") == "true"
+
 	server := Server{
 		Host: host, Port: port,
 		ReadTimeout:     readTimeout,
 		WriteTimeout:    writeTimeout,
 		IdleTimeout:     idleTimeout,
 		ShutdownTimeout: shutdownTimeout,
+		BehindProxy:     behindProxy,
 	}
 
 	if len(errs) > 0 {

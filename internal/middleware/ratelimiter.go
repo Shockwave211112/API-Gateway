@@ -15,13 +15,15 @@ type RateLimiter struct {
 	redis  *redis.Client
 	limit  int
 	window time.Duration
+	script *redis.Script
 }
 
-func NewRateLimiter(redis *redis.Client, limit int, window time.Duration) *RateLimiter {
+func NewRateLimiter(redisClient *redis.Client, limit int, window time.Duration) *RateLimiter {
 	return &RateLimiter{
-		redis:  redis,
+		redis:  redisClient,
 		limit:  limit,
 		window: window,
+		script: redis.NewScript(atomicLua),
 	}
 }
 
@@ -35,7 +37,7 @@ const atomicLua = `
 
 func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		windowNumber := int(time.Now().Unix() / int64(rl.window))
+		windowNumber := int(time.Now().Unix() / int64(rl.window.Seconds()))
 		ip, err := netip.ParseAddrPort(r.RemoteAddr)
 		if err != nil {
 			slog.Error(
@@ -51,15 +53,18 @@ func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 		}
 		key := fmt.Sprintf("ratelimit:%s:%d", ip.Addr(), windowNumber)
 
-		script := redis.NewScript(atomicLua)
-		result, err := script.Run(r.Context(), rl.redis, []string{key}, rl.window.Seconds()).Int()
+		result, err := rl.script.Run(r.Context(), rl.redis, []string{key}, rl.window.Seconds()).Int()
 		if err != nil {
 			slog.Error(
 				"rate limiter error",
 				"error", err.Error(),
 				"path", r.URL.Path,
 			)
-		} else if result > rl.limit {
+			next.ServeHTTP(w, r) // fail open
+			return
+		}
+
+		if result > rl.limit {
 			reqId, ok := RequestIDFromContext(r.Context())
 			if !ok {
 				reqId = "unknown"
@@ -72,6 +77,7 @@ func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 				"request_id", reqId,
 				"remote_addr", r.RemoteAddr,
 			)
+			w.Header().Set("Retry-After", fmt.Sprintf("%d", int(rl.window.Seconds())))
 			jsonresponse.WriteJSON(w, http.StatusTooManyRequests, jsonresponse.Body{
 				Status:  "error",
 				Message: "Please slow down",
