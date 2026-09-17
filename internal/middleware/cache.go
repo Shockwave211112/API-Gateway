@@ -26,10 +26,10 @@ func (tc *TokenCache) Get(hash string) (valid, found bool) {
 	defer tc.mu.RUnlock()
 
 	value, ok := tc.items[hash]
-	if !ok {
+	if !ok || time.Now().After(value.expiresAt) {
 		return false, false
 	}
-	return value.valid && time.Now().Before(value.expiresAt), true
+	return value.valid, true
 }
 
 func (tc *TokenCache) Set(hash string, valid bool, ttl time.Duration) {

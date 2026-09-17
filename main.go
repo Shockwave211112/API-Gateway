@@ -31,7 +31,9 @@ func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	slog.SetDefault(logger)
 
-	httpClient := &http.Client{}
+	httpClient := &http.Client{
+		Timeout: cfg.App.DialTimeout,
+	}
 	tokenCache := middleware.NewTokenCache()
 	authService := middleware.NewAuth(tokenCache, backendURL, httpClient)
 
