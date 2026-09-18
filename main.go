@@ -36,6 +36,12 @@ func main() {
 	httpClient := &http.Client{
 		Timeout: cfg.App.DialTimeout,
 	}
+	redisClient := redis.NewClient(&redis.Options{
+		Addr:        cfg.Redis.Addr(),
+		Password:    cfg.Redis.Password,
+		DialTimeout: cfg.Redis.DialTimeout,
+	})
+
 	tokenCache := middleware.NewTokenCache()
 	authService := middleware.NewAuth(
 		tokenCache,
@@ -43,21 +49,21 @@ func main() {
 		cfg.App.CheckRoute,
 		httpClient,
 	)
-
-	redisClient := redis.NewClient(&redis.Options{
-		Addr:        cfg.Redis.Addr(),
-		Password:    cfg.Redis.Password,
-		DialTimeout: cfg.Redis.DialTimeout,
-	})
 	rateLimitService := middleware.NewRateLimiter(
 		redisClient,
 		cfg.RateLimit.RatePerWindow,
 		cfg.RateLimit.WindowSize,
 	)
+	realIpService := middleware.NewRealIP(cfg.Server.BehindProxy)
 
-	proxyHandler := proxy.NewProxy(backendURL, cfg.App, cfg.Server.BehindProxy)
-	publicHandler := middleware.LoggerMiddleware(rateLimitService.Middleware(proxyHandler))
-	protectedHandler := middleware.LoggerMiddleware(rateLimitService.Middleware(authService.Middleware(proxyHandler)))
+	proxyHandler := proxy.NewProxy(backendURL, cfg.App)
+	publicHandler := middleware.LoggerMiddleware(
+		realIpService.Middleware(
+			rateLimitService.Middleware(proxyHandler)))
+	protectedHandler := middleware.LoggerMiddleware(
+		realIpService.Middleware(
+			rateLimitService.Middleware(
+				authService.Middleware(proxyHandler))))
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
