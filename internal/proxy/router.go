@@ -31,6 +31,7 @@ func NewProxy(backendUrl *url.URL, app config.Backend) http.Handler {
 			}).DialContext,
 			ResponseHeaderTimeout: app.ResponseTimeout,
 			IdleConnTimeout:       app.IdleTimeout,
+			MaxIdleConns:          app.MaxIdleConns,
 		},
 
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, proxyErr error) {

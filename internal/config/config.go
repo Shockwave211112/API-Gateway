@@ -100,7 +100,7 @@ func loadApp() (Backend, error) {
 	connectTimeout := c.duration("APP_CONNECT_TIMEOUT", getEnv("APP_CONNECT_TIMEOUT", "10s"), time.Second)
 	responseTimeout := c.duration("APP_RESPONSE_TIMEOUT", getEnv("APP_RESPONSE_TIMEOUT", "20s"), time.Second)
 	idleTimeout := c.duration("APP_IDLE_TIMEOUT", getEnv("APP_IDLE_TIMEOUT", "120s"), time.Second)
-	maxIdleConns := c.intField("APP_MAX_IDLE_CONNS", getEnv("APP_MAX_IDLE_CONNS", "10"))
+	maxIdleConns := c.intField("APP_MAX_IDLE_CONNS", getEnv("APP_MAX_IDLE_CONNS", "100"))
 	loggedRoutes := strings.Split(getEnv("APP_LOGGED_ROUTES", ""), ",")
 	for i := range loggedRoutes {
 		loggedRoutes[i] = strings.TrimSpace(loggedRoutes[i])

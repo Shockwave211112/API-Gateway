@@ -10,9 +10,11 @@ import (
 	"gateway/internal/proxy"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -30,18 +32,50 @@ func main() {
 		os.Exit(1)
 	}
 
-	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
-	slog.SetDefault(logger)
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
 
-	httpClient := &http.Client{
-		Timeout: cfg.App.DialTimeout,
+	httpClient := newHTTPClient(cfg.App)
+	redisClient := newRedisClient(cfg.Redis)
+	defer func() {
+		if err := redisClient.Close(); err != nil {
+			slog.Error("failed to close redis client",
+				"error", err,
+			)
+		}
+	}()
+
+	public, protected := buildHandlers(cfg, backendURL, httpClient, redisClient)
+	mux := buildMux(cfg.App, public, protected)
+
+	server := &http.Server{
+		Addr:         cfg.Server.Addr(),
+		Handler:      mux,
+		ReadTimeout:  cfg.Server.ReadTimeout,
+		WriteTimeout: cfg.Server.WriteTimeout,
+		IdleTimeout:  cfg.Server.IdleTimeout,
 	}
-	redisClient := redis.NewClient(&redis.Options{
-		Addr:        cfg.Redis.Addr(),
-		Password:    cfg.Redis.Password,
-		DialTimeout: cfg.Redis.DialTimeout,
-	})
 
+	if err := runServer(server, cfg.Server.ShutdownTimeout); err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+}
+
+func newHTTPClient(cfg config.Backend) *http.Client {
+	return &http.Client{
+		Timeout: cfg.DialTimeout,
+	}
+}
+
+func newRedisClient(cfg config.Redis) *redis.Client {
+	return redis.NewClient(&redis.Options{
+		Addr:        cfg.Addr(),
+		Password:    cfg.Password,
+		DialTimeout: cfg.DialTimeout,
+	})
+}
+
+func buildHandlers(cfg config.Config, backendURL *url.URL, httpClient *http.Client, redisClient *redis.Client) (public, protected http.Handler) {
 	tokenCache := middleware.NewTokenCache()
 	authService := middleware.NewAuth(
 		tokenCache,
@@ -57,67 +91,66 @@ func main() {
 	realIpService := middleware.NewRealIP(cfg.Server.BehindProxy)
 
 	proxyHandler := proxy.NewProxy(backendURL, cfg.App)
-	publicHandler := middleware.LoggerMiddleware(
+	public = middleware.LoggerMiddleware(
 		realIpService.Middleware(
 			rateLimitService.Middleware(proxyHandler)))
-	protectedHandler := middleware.LoggerMiddleware(
+	protected = middleware.LoggerMiddleware(
 		realIpService.Middleware(
 			rateLimitService.Middleware(
 				authService.Middleware(proxyHandler))))
 
+	return public, protected
+}
+
+func buildMux(cfg config.Backend, public, protected http.Handler) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		jsonresponse.WriteJSON(w, http.StatusBadGateway, jsonresponse.Body{
+		jsonresponse.WriteJSON(w, http.StatusOK, jsonresponse.Body{
 			Status:  "success",
 			Message: "Alive",
 		})
 	})
 
-	for _, v := range cfg.App.LoggedRoutes {
-		mux.Handle(v, publicHandler)
+	for _, v := range cfg.LoggedRoutes {
+		mux.Handle(v, public)
 	}
 
-	for _, v := range cfg.App.ProtectedRoutes {
-		mux.Handle(v, protectedHandler)
+	for _, v := range cfg.ProtectedRoutes {
+		mux.Handle(v, protected)
 	}
 
-	errChan := make(chan error, 1)
+	return mux
+}
+
+func runServer(server *http.Server, shutdownTimeout time.Duration) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	server := &http.Server{
-		Addr:         cfg.Server.Addr(),
-		Handler:      mux,
-		ReadTimeout:  cfg.Server.ReadTimeout,
-		WriteTimeout: cfg.Server.WriteTimeout,
-		IdleTimeout:  cfg.Server.IdleTimeout,
-	}
+	errChan := make(chan error, 1)
 
 	go func() {
-		if err := server.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errChan <- err
 		}
 	}()
 
-	fmt.Println("Server is running on http://" + cfg.Server.Addr())
+	fmt.Println("Server is running on http://" + server.Addr)
 
 	select {
 	case <-ctx.Done():
-		fmt.Println("Stop via commandline")
+		fmt.Println("Shutting down server gracefully...")
 
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeout)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
 
 		if err := server.Shutdown(shutdownCtx); err != nil {
-			fmt.Printf("Error on server shutdown: %v\n", err)
-			stop()
-			os.Exit(1)
+			return fmt.Errorf("forced server shutdown: %w", err)
 		}
 
-		fmt.Println("Server successfully stopped")
+		fmt.Println("Server stopped successfully")
+		return nil
+
 	case err := <-errChan:
-		fmt.Printf("Server error: %v\n", err)
-		stop()
-		os.Exit(1)
+		return fmt.Errorf("server error: %w", err)
 	}
 }
