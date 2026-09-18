@@ -3,67 +3,11 @@ package config
 import (
 	"errors"
 	"fmt"
-	"net"
-	"net/url"
-	"os"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
 )
-
-type Config struct {
-	Server    Server
-	Redis     Redis
-	App       Backend
-	RateLimit RateLimit
-}
-
-type HostWithPort struct {
-	Host string
-	Port int
-}
-
-type Server struct {
-	HostWithPort
-	ReadTimeout     time.Duration
-	WriteTimeout    time.Duration
-	IdleTimeout     time.Duration
-	ShutdownTimeout time.Duration
-	BehindProxy     bool
-}
-
-type Redis struct {
-	HostWithPort
-	Password    string
-	DialTimeout time.Duration
-}
-
-func (hp HostWithPort) Addr() string {
-	return net.JoinHostPort(hp.Host, strconv.Itoa(hp.Port))
-}
-
-type Backend struct {
-	Host            string
-	Port            int
-	DialTimeout     time.Duration
-	ResponseTimeout time.Duration
-	IdleTimeout     time.Duration
-	MaxIdleConns    int
-	CheckRoute      string
-	LoggedRoutes    []string
-	ProtectedRoutes []string
-}
-
-func (b Backend) Url() (*url.URL, error) {
-	return url.Parse("http://" + net.JoinHostPort(b.Host, strconv.Itoa(b.Port)))
-}
-
-type RateLimit struct {
-	RatePerWindow int
-	WindowSize    time.Duration
-}
 
 func Load() (Config, error) {
 	var errs []error
@@ -104,152 +48,74 @@ func Load() (Config, error) {
 	return config, nil
 }
 
-func getEnv(field, defaultValue string) string {
-	value := os.Getenv(field)
-	if value == "" {
-		return defaultValue
-	}
-	return value
-}
-
-func mustGetEnv(field string) (string, error) {
-	value, ok := os.LookupEnv(field)
-	if !ok || value == "" {
-		return "", fmt.Errorf("%s is required", field)
-	}
-	return value, nil
-}
-
 func loadServer() (Server, error) {
-	var errs []error
+	var c errCollector
 
 	host := getEnv("SERVER_HOST", "localhost")
-
-	port, err := strconv.Atoi(getEnv("SERVER_PORT", "8080"))
-	if err != nil {
-		errs = append(errs, fmt.Errorf("invalid SERVER_PORT: %w", err))
-	}
-
-	readTimeout, err := time.ParseDuration(getEnv("READ_TIMEOUT", "5s"))
-	if err != nil {
-		errs = append(errs, fmt.Errorf("invalid READ_TIMEOUT: %w", err))
-	}
-
-	writeTimeout, err := time.ParseDuration(getEnv("WRITE_TIMEOUT", "10s"))
-	if err != nil {
-		errs = append(errs, fmt.Errorf("invalid WRITE_TIMEOUT: %w", err))
-	}
-
-	idleTimeout, err := time.ParseDuration(getEnv("IDLE_TIMEOUT", "120s"))
-	if err != nil {
-		errs = append(errs, fmt.Errorf("invalid IDLE_TIMEOUT: %w", err))
-	}
-
-	shutdownTimeout, err := time.ParseDuration(getEnv("SHUTDOWN_TIMEOUT", "5s"))
-	if err != nil {
-		errs = append(errs, fmt.Errorf("invalid SHUTDOWN_TIMEOUT: %w", err))
-	}
-
+	port := c.intField("SERVER_PORT", getEnv("SERVER_PORT", "8080"))
+	readTimeout := c.duration("READ_TIMEOUT", getEnv("READ_TIMEOUT", "5s"), time.Second)
+	writeTimeout := c.duration("WRITE_TIMEOUT", getEnv("WRITE_TIMEOUT", "10s"), time.Second)
+	idleTimeout := c.duration("IDLE_TIMEOUT", getEnv("IDLE_TIMEOUT", "120s"), time.Second)
+	shutdownTimeout := c.duration("SHUTDOWN_TIMEOUT", getEnv("SHUTDOWN_TIMEOUT", "5s"), time.Second)
 	behindProxy := getEnv("BEHIND_REVERSE_PROXY", "false") == "true"
 
-	server := Server{
+	if err := c.err(); err != nil {
+		return Server{}, err
+	}
+
+	return Server{
 		Host: host, Port: port,
 		ReadTimeout:     readTimeout,
 		WriteTimeout:    writeTimeout,
 		IdleTimeout:     idleTimeout,
 		ShutdownTimeout: shutdownTimeout,
 		BehindProxy:     behindProxy,
-	}
-
-	if len(errs) > 0 {
-		return Server{}, errors.Join(errs...)
-	}
-	return server, nil
+	}, nil
 }
 
 func loadRedis() (Redis, error) {
-	var errs []error
+	var c errCollector
 
-	host := getEnv("SERVER_HOST", "localhost")
+	host := getEnv("REDIS_HOST", "localhost")
+	port := c.intField("REDIS_PORT", getEnv("REDIS_PORT", "6379"))
+	password := getEnv("REDIS_PWD", "")
+	timeout := c.duration("REDIS_TIMEOUT", getEnv("REDIS_TIMEOUT", "30s"), time.Second)
 
-	port, err := strconv.Atoi(getEnv("REDIS_PORT", "6379"))
-	if err != nil {
-		errs = append(errs, fmt.Errorf("invalid REDIS_PORT: %w", err))
+	if err := c.err(); err != nil {
+		return Redis{}, err
 	}
 
-	password := getEnv("SERVER_HOST", "")
-
-	timeout, err := time.ParseDuration(getEnv("REDIS_TIMEOUT", "30s"))
-	if err != nil {
-		errs = append(errs, fmt.Errorf("invalid REDIS_TIMEOUT: %w", err))
-	}
-
-	redis := Redis{
+	return Redis{
 		Host: host, Port: port,
 		Password:    password,
 		DialTimeout: timeout,
-	}
-
-	if len(errs) > 0 {
-		return Redis{}, errors.Join(errs...)
-	}
-	return redis, nil
+	}, nil
 }
 
 func loadApp() (Backend, error) {
-	var errs []error
+	var c errCollector
 
-	host, err := mustGetEnv("APP_HOST")
-	if err != nil {
-		errs = append(errs, errors.New("APP_HOST must be init"))
-	}
-
-	portStr, err := mustGetEnv("APP_PORT")
-	if err != nil {
-		errs = append(errs, errors.New("APP_PORT must be init"))
-	}
-
-	port, err := strconv.Atoi(portStr)
-	if err != nil {
-		errs = append(errs, fmt.Errorf("invalid APP_PORT: %w", err))
-	}
-
-	connectTimeout, err := time.ParseDuration(getEnv("APP_CONNECT_TIMEOUT", "10s"))
-	if err != nil {
-		errs = append(errs, fmt.Errorf("invalid APP_CONNECT_TIMEOUT: %w", err))
-	}
-
-	responseTimeout, err := time.ParseDuration(getEnv("APP_RESPONSE_TIMEOUT", "120s"))
-	if err != nil {
-		errs = append(errs, fmt.Errorf("invalid APP_RESPONSE_TIMEOUT: %w", err))
-	}
-
-	idleTimeout, err := time.ParseDuration(getEnv("APP_IDLE_TIMEOUT", "120s"))
-	if err != nil {
-		errs = append(errs, fmt.Errorf("invalid APP_IDLE_TIMEOUT: %w", err))
-	}
-
-	maxIdleConns, err := strconv.Atoi(getEnv("APP_MAX_IDLE_CONNS", "10"))
-	if err != nil {
-		errs = append(errs, fmt.Errorf("invalid APP_MAX_IDLE_CONNS: %w", err))
-	}
-
+	host := c.required("APP_HOST")
+	port := c.intField("APP_PORT", c.required("APP_PORT"))
+	connectTimeout := c.duration("APP_CONNECT_TIMEOUT", getEnv("APP_CONNECT_TIMEOUT", "10s"), time.Second)
+	responseTimeout := c.duration("APP_RESPONSE_TIMEOUT", getEnv("APP_RESPONSE_TIMEOUT", "20s"), time.Second)
+	idleTimeout := c.duration("APP_IDLE_TIMEOUT", getEnv("APP_IDLE_TIMEOUT", "120s"), time.Second)
+	maxIdleConns := c.intField("APP_MAX_IDLE_CONNS", getEnv("APP_MAX_IDLE_CONNS", "10"))
 	loggedRoutes := strings.Split(getEnv("APP_LOGGED_ROUTES", ""), ",")
 	for i := range loggedRoutes {
 		loggedRoutes[i] = strings.TrimSpace(loggedRoutes[i])
 	}
-
 	protectedRoutes := strings.Split(getEnv("APP_PROTECTED_ROUTES", ""), ",")
-	for i := range loggedRoutes {
+	for i := range protectedRoutes {
 		protectedRoutes[i] = strings.TrimSpace(protectedRoutes[i])
 	}
+	checkRoute := c.required("APP_CHECK_ROUTE")
 
-	checkRoute, err := mustGetEnv("APP_CHECK_ROUTE")
-	if err != nil {
-		errs = append(errs, errors.New("APP_CHECK_ROUTE must be init"))
+	if err := c.err(); err != nil {
+		return Backend{}, err
 	}
 
-	app := Backend{
+	return Backend{
 		Host:            host,
 		Port:            port,
 		DialTimeout:     connectTimeout,
@@ -259,34 +125,21 @@ func loadApp() (Backend, error) {
 		LoggedRoutes:    loggedRoutes,
 		ProtectedRoutes: protectedRoutes,
 		CheckRoute:      checkRoute,
-	}
-
-	if len(errs) > 0 {
-		return Backend{}, errors.Join(errs...)
-	}
-	return app, nil
+	}, nil
 }
 
 func loadRL() (RateLimit, error) {
-	var errs []error
+	var c errCollector
 
-	rpw, err := strconv.Atoi(getEnv("RATE_LIMIT_RPW", "10"))
-	if err != nil {
-		errs = append(errs, fmt.Errorf("invalid RATE_LIMIT_RPW: %w", err))
+	rpw := c.intField("RATE_LIMIT_RPW", getEnv("RATE_LIMIT_RPW", "10"))
+	windowSize := c.duration("RATE_LIMIT_WINDOW", getEnv("RATE_LIMIT_WINDOW", "1s"), time.Second)
+
+	if err := c.err(); err != nil {
+		return RateLimit{}, err
 	}
 
-	windowSize, err := time.ParseDuration(getEnv("RATE_LIMIT_WINDOW", "1s"))
-	if err != nil {
-		errs = append(errs, fmt.Errorf("invalid RATE_LIMIT_WINDOW: %w", err))
-	}
-
-	rl := RateLimit{
+	return RateLimit{
 		RatePerWindow: rpw,
 		WindowSize:    windowSize,
-	}
-
-	if len(errs) > 0 {
-		return RateLimit{}, errors.Join(errs...)
-	}
-	return rl, nil
+	}, nil
 }
