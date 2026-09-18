@@ -1,0 +1,45 @@
+version: '3'
+
+networks:
+    api_gateway:
+
+services:
+    nginx:
+        build:
+            context: ..
+            dockerfile: ./docker/nginx/Dockerfile
+        restart: always
+        container_name: api_nginx
+        volumes:
+            - ./nginx/conf.d:/etc/nginx/conf.d
+        ports:
+            - "8000:80"
+        networks:
+            - api_gateway
+        depends_on:
+            - gateway
+    gateway:
+        build:
+            context: ..
+            dockerfile: ./docker/Dockerfile
+        restart: always
+        container_name: api_gateway
+        networks:
+            - api_gateway
+        depends_on:
+            - redis
+#        extra_hosts:
+#            - "host.docker.internal:host-gateway"
+    redis:
+        restart: always
+        image: redis:8.10.1-alpine
+        container_name: api_redis
+        volumes:
+            - redis_data:/data
+        networks:
+            - api_gateway
+        ports:
+            - "6379:6379"
+
+volumes:
+    redis_data:
