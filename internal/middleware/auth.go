@@ -82,7 +82,7 @@ func (a *Auth) Middleware(next http.Handler) http.Handler {
 }
 
 func (a *Auth) verifyToken(ctx context.Context, token string) (bool, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.backendURL.String()+"/user/info", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.backendURL.String()+a.checkRoute, nil)
 	if err != nil {
 		return false, err
 	}
